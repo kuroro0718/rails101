@@ -10,7 +10,7 @@ class User < ActiveRecord::Base
   has_many :participated_groups, through: :group_users, source: :group
 
   def join!(group)
-    participated_gropus << group
+    participated_groups << group
   end
 
   def quit!(group)

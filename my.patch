@@ -1,0 +1,256 @@
+diff --git a/app/controllers/groups_controller.rb b/app/controllers/groups_controller.rb
+index 0df7392..6ec4880 100644
+--- a/app/controllers/groups_controller.rb
++++ b/app/controllers/groups_controller.rb
+@@ -1,8 +1,6 @@
+ class GroupsController < ApplicationController
+   before_action :authenticate_user!, only: [:new, :edit, :create, :update, :destroy]
+ 
+-  before_action :find_group, only: [:edit, :update, :destroy]
+-
+   def index
+     @groups = Group.all
+   end
+@@ -21,10 +19,9 @@ class GroupsController < ApplicationController
+   end
+ 
+   def create
+-    @group = current_user.groups.new(group_params)
++    @group = current_user.groups.create(group_params)
+ 
+     if @group.save
+-      current_user.join!(@group)
+       redirect_to groups_path, notice: '新增討論版成功'
+     else
+       render :new
+@@ -53,29 +50,4 @@ class GroupsController < ApplicationController
+     params.require(:group).permit(:title, :description)
+   end
+ 
+-  def join
+-    @group = Group.find(params[:id])
+-
+-    if !current_user.is_member_of?(@group)
+-      current_user.join!(@group)
+-      flash[:notice] = "加入本討論版成功!"
+-    else
+-      flash[:warning] = "你己經是本討論版成員了!"
+-    end
+-
+-    redirect_to group_path(@group)
+-  end
+-
+-  def quit
+-    @group = Group.find(params[:id])
+-
+-    if current_user.is_member_of?(@group)
+-      current_user.quit!(@group)
+-      flash[:alert] = "己退出本討論版!"
+-    else
+-      flash[:warning] = "你不是本討論版成員!"
+-    end
+-
+-    redirect_to group_path(@group)
+-  end
+ end
+diff --git a/app/controllers/posts_controller.rb b/app/controllers/posts_controller.rb
+index d7d0475..278ff12 100644
+--- a/app/controllers/posts_controller.rb
++++ b/app/controllers/posts_controller.rb
+@@ -1,8 +1,6 @@
+ class PostsController < ApplicationController
+-
+-  before_action :authenticate_user!
+   before_action :find_group
+-  before_action :member_required, only: [ :new, :create ]
++  before_action :authenticate_user!
+ 
+   def new
+     @post = @group.posts.new
+@@ -50,10 +48,4 @@ class PostsController < ApplicationController
+     @group = Group.find(params[:group_id])
+   end
+ 
+-  def member_required
+-    if !current_user.is_member_of?(@group)
+-      flash[:warning] = "你不是這個討論版的成員, 不能發文喔!"
+-      redirect_to group_path(@group)
+-    end
+-  end
+ end
+diff --git a/app/models/group.rb b/app/models/group.rb
+index 9ededae..513a5b0 100644
+--- a/app/models/group.rb
++++ b/app/models/group.rb
+@@ -2,8 +2,6 @@ class Group < ActiveRecord::Base
+   validates :title, presence: true
+ 
+   has_many :posts
+-  has_many :group_users
+-  has_many :members, through: :group_users, source: :user
+   belongs_to :owner, class_name: "User", foreign_key: :user_id
+ 
+   def editable_by?(user)
+diff --git a/app/models/group_user.rb b/app/models/group_user.rb
+deleted file mode 100644
+index 0c93905..0000000
+--- a/app/models/group_user.rb
++++ /dev/null
+@@ -1,4 +0,0 @@
+-class GroupUser < ActiveRecord::Base
+-  belongs_to :group
+-  belongs_to :user
+-end
+diff --git a/app/models/user.rb b/app/models/user.rb
+index 7e453ce..b2fb109 100644
+--- a/app/models/user.rb
++++ b/app/models/user.rb
+@@ -6,19 +6,4 @@ class User < ActiveRecord::Base
+ 
+   has_many :groups
+   has_many :posts
+-  has_many :group_users
+-  has_many :participated_groups, through: :group_users, source: :group
+-
+-  def join!(group)
+-    participated_gropus << group
+-  end
+-
+-  def quit!(group)
+-    participated_groups.delete(group)
+-  end
+-
+-  def is_member_of?(group)
+-    participated_groups.include?(group)
+-  end
+-
+ end
+diff --git a/app/views/groups/show.html.erb b/app/views/groups/show.html.erb
+index 24f3320..cad444c 100644
+--- a/app/views/groups/show.html.erb
++++ b/app/views/groups/show.html.erb
+@@ -1,18 +1,7 @@
+ <div class="col-md-12">
+   <div class="group">
+     <%= link_to("New Post", new_group_post_path(@group), class: "btn btn-warning pull-right")  %>
+-
+-    <% if @group.editable_by?(current_user) %>
+-       <%= link_to("Edit", edit_group_path(@group), class: "btn btn-primary pull-right") %>
+-    <% end %>
+-
+-    <% if current_user.present? %>
+-      <% if current_user.is_member_of?(@group) %>
+-        <%= link_to("Quit Group", quit_group_path(@group), method: :post, class: "btn btn-danger")  %>
+-      <% else %>
+-          <%= link_to("Join Group", join_group_path(@group), method: :post, class: "btn btn-info")  %>
+-      <% end %>
+-    <% end %>
++    <%= link_to("Edit", edit_group_path(@group), class: "btn btn-primary pull-right") %>
+   </div>
+   <h2><%= @group.title %></h2>
+   <p><%= @group.description %></p>
+diff --git a/config/routes.rb b/config/routes.rb
+index 60f14e0..c845807 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -2,11 +2,6 @@ Rails.application.routes.draw do
+   devise_for :users
+   root 'groups#index'
+   resources :groups do
+-    member do
+-      post :join
+-      post :quit
+-    end
+-
+     resources :posts
+   end
+   # The priority is based upon order of creation: first created -> highest priority.
+diff --git a/db/migrate/20151024062636_add_user_id_to_post.rb b/db/migrate/20151024062636_add_user_id_to_post.rb
+new file mode 100644
+index 0000000..bea0bc5
+--- /dev/null
++++ b/db/migrate/20151024062636_add_user_id_to_post.rb
+@@ -0,0 +1,5 @@
++class AddUserIdToPost < ActiveRecord::Migration
++  def change
++    add_column :posts, :user_id, :integer
++  end
++end
+diff --git a/db/migrate/20151024063907_create_group_users.rb b/db/migrate/20151024063907_create_group_users.rb
+deleted file mode 100644
+index 0a44337..0000000
+--- a/db/migrate/20151024063907_create_group_users.rb
++++ /dev/null
+@@ -1,10 +0,0 @@
+-class CreateGroupUsers < ActiveRecord::Migration
+-  def change
+-    create_table :group_users do |t|
+-      t.integer :group_id
+-      t.integer :user_id
+-
+-      t.timestamps null: false
+-    end
+-  end
+-end
+diff --git a/db/migrate/20151024162934_add_user_id_to_group.rb b/db/migrate/20151024162934_add_user_id_to_group.rb
+deleted file mode 100644
+index ad03bd1..0000000
+--- a/db/migrate/20151024162934_add_user_id_to_group.rb
++++ /dev/null
+@@ -1,5 +0,0 @@
+-class AddUserIdToGroup < ActiveRecord::Migration
+-  def change
+-    add_column :groups, :user_id, :integer
+-  end
+-end
+diff --git a/db/schema.rb b/db/schema.rb
+index 44d02a7..7cea98e 100644
+--- a/db/schema.rb
++++ b/db/schema.rb
+@@ -11,14 +11,7 @@
+ #
+ # It's strongly recommended that you check this file into your version control system.
+ 
+-ActiveRecord::Schema.define(version: 20151024162934) do
+-
+-  create_table "group_users", force: :cascade do |t|
+-    t.integer  "group_id"
+-    t.integer  "user_id"
+-    t.datetime "created_at", null: false
+-    t.datetime "updated_at", null: false
+-  end
++ActiveRecord::Schema.define(version: 20151024062636) do
+ 
+   create_table "groups", force: :cascade do |t|
+     t.string   "title"
+diff --git a/test/fixtures/group_users.yml b/test/fixtures/group_users.yml
+deleted file mode 100644
+index c264a17..0000000
+--- a/test/fixtures/group_users.yml
++++ /dev/null
+@@ -1,9 +0,0 @@
+-# Read about fixtures at http://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+-
+-one:
+-  group_id: 1
+-  user_id: 1
+-
+-two:
+-  group_id: 1
+-  user_id: 1
+diff --git a/test/models/group_user_test.rb b/test/models/group_user_test.rb
+deleted file mode 100644
+index 8a46343..0000000
+--- a/test/models/group_user_test.rb
++++ /dev/null
+@@ -1,7 +0,0 @@
+-require 'test_helper'
+-
+-class GroupUserTest < ActiveSupport::TestCase
+-  # test "the truth" do
+-  #   assert true
+-  # end
+-end
+diff --git a/user_id_error.patch b/user_id_error.patch
+deleted file mode 100644
+index e69de29..0000000
